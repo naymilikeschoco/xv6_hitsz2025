@@ -21,6 +21,34 @@ static void freeproc(struct proc *p);
 
 extern char trampoline[];  // trampoline.S
 
+char* getState(struct proc *p){
+  char *statestr; 
+  if (p) {
+    switch(p->state){
+    case UNUSED:
+      statestr = "unused";
+      break;
+    case SLEEPING:
+      statestr = "sleep";
+      break;
+    case RUNNABLE:
+      statestr = "runble";
+      break;
+    case RUNNING:
+      statestr = "run";
+      break;
+    case ZOMBIE:
+      statestr = "zombie";
+      break;
+    default:
+      statestr = "unknown";
+      break;
+    }
+    return statestr;
+  }  
+  else return "null";
+}
+
 // initialize the proc table at boot time.
 void procinit(void) {
   struct proc *p;
@@ -277,9 +305,12 @@ void reparent(struct proc *p) {
     // acquiring the lock first could cause a deadlock
     // if pp or a child of pp were also in exit()
     // and about to try to lock p.
+    int child_cnt = 0;
     if (pp->parent == p) {
       // pp->parent can't change between the check and the acquire()
       // because only the parent changes it, and we're the parent.
+      exit_info("proc %d exit, child %d, pid %d, name %s, state %s\n", pp->parent->pid, child_cnt, pp->pid, pp->name, getState(pp));
+      child_cnt++;
       acquire(&pp->lock);
       pp->parent = initproc;
       // we should wake up init here, but that would require
@@ -312,6 +343,8 @@ void exit(int status) {
   iput(p->cwd);
   end_op();
   p->cwd = 0;
+
+  exit_info("proc %d exit, parent pid %d, name %s, state %s\n", p->pid, p->parent->pid, p->parent->name, getState(p->parent));
 
   // we might re-parent a child to init. we can't be precise about
   // waking up init, since we can't acquire its lock once we've
@@ -356,7 +389,8 @@ void exit(int status) {
 
 // Wait for a child process to exit and return its pid.
 // Return -1 if this process has no children.
-int wait(uint64 addr) {
+int wait(uint64 addr, int flags) {
+  //flags为1时不阻塞否则阻塞
   struct proc *np;
   int havekids, pid;
   struct proc *p = myproc();
@@ -396,6 +430,11 @@ int wait(uint64 addr) {
 
     // No point waiting if we don't have any children.
     if (!havekids || p->killed) {
+      release(&p->lock);
+      return -1;
+    }
+
+    if(flags == 1){
       release(&p->lock);
       return -1;
     }
