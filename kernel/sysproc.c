@@ -22,6 +22,8 @@ uint64 sys_wait(void) {
   uint64 p;
   int flags; //为1时不阻塞否则阻塞
   if (argaddr(0, &p) < 0) return -1;
+  // 获取第二个参数（整数）
+  if (argint(1, &flags) < 0) return -1;
   return wait(p, flags);
 }
 
@@ -80,5 +82,34 @@ uint64 sys_rename(void) {
   struct proc *p = myproc();
   memmove(p->name, name, len);
   p->name[len] = '\0';
+  return 0;
+}
+
+uint64 sys_yield(void) {
+  struct proc* p = myproc();
+
+ // 计算上下文保存的地址区间
+  uint64 start_addr = (uint64)(&(p->context));
+  uint64 end_addr = start_addr + sizeof(struct context);
+  
+  printf("Save the context of the process to the memory region from address %p to %p\n", 
+         start_addr, end_addr);
+
+  printf("Current running process pid is %d and user pc is %p\n", p->pid, p->trapframe->epc);
+
+  //环形遍历全局进程表找到下一个RUNNABLE进程
+  acquire(&p->lock);
+  struct proc *next;
+  int start_idx = p->pid;
+  for (int i = 1; i < NPROC; i++) {
+    int idx = (start_idx + i) % NPROC;
+    if (proc[idx].state == RUNNABLE && &proc[idx] != p) {
+      next = &proc[idx];
+      printf("Next runnable process pid is %d and user pc is %p\n", next->pid, next->trapframe->epc);
+      break;
+    }
+  }
+  release(&p->lock);
+  yield();
   return 0;
 }
