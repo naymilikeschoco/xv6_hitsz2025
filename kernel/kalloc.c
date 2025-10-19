@@ -18,16 +18,51 @@ struct run {
   struct run *next;
 };
 
-struct {
+struct kmem{
   struct spinlock lock;
   struct run *freelist;
-} kmem;
+};
+
+struct kmem kmems[NCPU];
 
 void
 kinit()
 {
-  initlock(&kmem.lock, "kmem");
-  freerange(end, (void*)PHYSTOP);
+  // 初始化每个CPU的锁
+  for (int id = 0; id < NCPU; id++) {
+    initlock(&kmems[id].lock, "kmem");
+    kmems[id].freelist = 0;  //初始化为空
+  }
+
+  uint64 start_addr = (uint64)end;
+  uint64 total_pages = (PHYSTOP - start_addr) / PGSIZE;
+  uint64 pages_per_cpu = total_pages / NCPU;
+
+  for (int i = 0; i < NCPU; i++) {
+    uint64 cpu_start = start_addr + i * pages_per_cpu * PGSIZE;
+    uint64 cpu_end;
+    
+    if (i == NCPU - 1) {
+      cpu_end = PHYSTOP;
+    } else {
+      cpu_end = cpu_start + pages_per_cpu * PGSIZE;
+      cpu_end = PGROUNDDOWN(cpu_end);
+    }
+    
+    // 确保起始地址对齐
+    cpu_start = PGROUNDUP(cpu_start);
+
+    // 初始化该CPU的内存池
+    for (uint64 p = cpu_start; p + PGSIZE <= cpu_end; p += PGSIZE) {
+      // 确保不重复初始化同一个页面
+      struct run *r = (struct run*)p;
+      acquire(&kmems[i].lock);
+      r->next = kmems[i].freelist;
+      kmems[i].freelist = r;
+      release(&kmems[i].lock);
+    }
+  }
+  
 }
 
 void
@@ -56,10 +91,14 @@ kfree(void *pa)
 
   r = (struct run*)pa;
 
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+  //在调用cpuid()并使用其返回值的过程中需要关闭中断。
+  push_off();
+  int cpu_id = cpuid();
+  acquire(&kmems[cpu_id].lock);
+  r->next = kmems[cpu_id].freelist;
+  kmems[cpu_id].freelist = r;
+  release(&kmems[cpu_id].lock);
+  pop_off();
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -69,14 +108,43 @@ void *
 kalloc(void)
 {
   struct run *r;
+  int cpu_id;
 
-  acquire(&kmem.lock);
-  r = kmem.freelist;
-  if(r)
-    kmem.freelist = r->next;
-  release(&kmem.lock);
+  push_off();
+  cpu_id = cpuid();
 
-  if(r)
-    memset((char*)r, 5, PGSIZE); // fill with junk
-  return (void*)r;
+  // 先尝试当前CPU的内存池
+  acquire(&kmems[cpu_id].lock);
+  r = kmems[cpu_id].freelist;
+  if(r) {
+    kmems[cpu_id].freelist = r->next;
+    release(&kmems[cpu_id].lock);
+    pop_off();
+    
+    if(r)
+      memset((char*)r, 5, PGSIZE);
+    return (void*)r;
+  }
+  release(&kmems[cpu_id].lock);  // 重要：当前CPU为空时要释放锁
+
+  // 当前CPU为空，尝试其他CPU
+  for (int i = 0; i < NCPU; i++) {
+    if (i == cpu_id) continue;
+    
+    acquire(&kmems[i].lock);
+    r = kmems[i].freelist;
+    if (r) {
+      kmems[i].freelist = r->next;
+      release(&kmems[i].lock);
+      pop_off();
+      
+      if(r)
+        memset((char*)r, 5, PGSIZE);
+      return (void*)r;
+    }
+    release(&kmems[i].lock);
+  }
+  pop_off();
+  // 所有内存池都为空
+  return 0;
 }
