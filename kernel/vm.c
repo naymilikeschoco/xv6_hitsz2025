@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -45,6 +47,37 @@ void kvminit() {
   kvmmap(TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
 }
 
+  /*
+ * create a copy kernel page table for each process.
+ */
+pagetable_t proc_kvminit() {
+  pagetable_t k_pagetable = (pagetable_t)kalloc();
+  if (k_pagetable == 0) {
+    printf("proc_kvminit: kalloc failed\n");
+    return 0;
+  }
+  memset(k_pagetable, 0, PGSIZE);
+
+  // uart registers
+  mappages(k_pagetable, UART0, PGSIZE, UART0, PTE_R | PTE_W);
+  // virtio mmio disk interface
+  mappages(k_pagetable, VIRTIO0, PGSIZE, VIRTIO0, PTE_R | PTE_W);
+  // PLIC
+  mappages(k_pagetable, PLIC, 0x400000, PLIC, PTE_R | PTE_W);
+  // map kernel text executable and read-only.
+  uint64 text_size = (uint64)etext - KERNBASE;
+  mappages(k_pagetable, KERNBASE, text_size, KERNBASE, PTE_R | PTE_X);
+  // map kernel data and the physical RAM we'll make use of.
+  uint64 data_size = PHYSTOP - (uint64)etext;
+  mappages(k_pagetable, (uint64)etext, data_size, (uint64)etext, PTE_R | PTE_W);
+
+  // map the trampoline for trap entry/exit to
+  // the highest virtual address in the kernel.
+  mappages(k_pagetable, TRAMPOLINE, PGSIZE, (uint64)trampoline, PTE_R | PTE_X);
+
+  return k_pagetable;
+}
+
 // Switch h/w page table register to the kernel's page table,
 // and enable paging.
 void kvminithart() {
@@ -78,6 +111,48 @@ pte_t *walk(pagetable_t pagetable, uint64 va, int alloc) {
     }
   }
   return &pagetable[PX(0, va)];
+}
+
+// 同步用户页表到内核页表，共享叶子页表
+void sync_pagetable(pagetable_t k_pagetable, pagetable_t upagetable) {
+  // 用户页表地址空间为0x0-0xC000000
+  // 96个次级页表项就可以覆盖
+  pte_t *ktable = (pte_t*)PTE2PA(k_pagetable[0]);
+  pte_t *utable = (pte_t*)PTE2PA(upagetable[0]);
+  
+  for(int i = 0; i < 95; i++) {
+    pte_t u_pte = utable[i];
+    pte_t *k_pte = &ktable[i];
+      
+    // 如果用户页表项无效，跳过
+    if(!(u_pte & PTE_V)) {
+      // 清除内核页表中对应的无效项
+      if(*k_pte & PTE_V) {
+        *k_pte = 0;
+      }
+      continue;
+    }
+      
+    // 获取页表项指向的物理页
+    uint64 pa = PTE2PA(u_pte);
+    // 直接共享用户页表的叶子页表，移除用户权限位
+    uint64 flags = (u_pte & ~PTE_U) | PTE_V;   
+    // 设置内核页表项指向相同的物理页
+    *k_pte = PA2PTE(pa) | flags;
+  }
+}
+
+// 解除页表共享，只处理用户空间范围
+void unsync_pagetable(pagetable_t k_pagetable) {
+  if(k_pagetable == 0) return;
+  
+  pte_t *ktable = (pte_t*)PTE2PA(k_pagetable[0]);
+  if(ktable == 0) return;
+  
+  // 清理用户空间范围：0x0 - 0xC0000000
+  for(int i = 0; i < 95; i++) {
+    ktable[i] = 0;
+  }
 }
 
 // Look up a virtual address, return the physical address,
@@ -316,21 +391,10 @@ int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len) {
 // Copy len bytes to dst from virtual address srcva in a given page table.
 // Return 0 on success, -1 on error.
 int copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len) {
-  uint64 n, va0, pa0;
-
-  while (len > 0) {
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
-    if (pa0 == 0) return -1;
-    n = PGSIZE - (srcva - va0);
-    if (n > len) n = len;
-    memmove(dst, (void *)(pa0 + (srcva - va0)), n);
-
-    len -= n;
-    dst += n;
-    srcva = va0 + PGSIZE;
-  }
-  return 0;
+  w_sstatus(r_sstatus() | SSTATUS_SUM);
+  int res = copyin_new(pagetable, dst, srcva, len);
+  w_sstatus(r_sstatus() & ~SSTATUS_SUM);
+  return res;
 }
 
 // Copy a null-terminated string from user to kernel.
@@ -338,38 +402,10 @@ int copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len) {
 // until a '\0', or max.
 // Return 0 on success, -1 on error.
 int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max) {
-  uint64 n, va0, pa0;
-  int got_null = 0;
-
-  while (got_null == 0 && max > 0) {
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
-    if (pa0 == 0) return -1;
-    n = PGSIZE - (srcva - va0);
-    if (n > max) n = max;
-
-    char *p = (char *)(pa0 + (srcva - va0));
-    while (n > 0) {
-      if (*p == '\0') {
-        *dst = '\0';
-        got_null = 1;
-        break;
-      } else {
-        *dst = *p;
-      }
-      --n;
-      --max;
-      p++;
-      dst++;
-    }
-
-    srcva = va0 + PGSIZE;
-  }
-  if (got_null) {
-    return 0;
-  } else {
-    return -1;
-  }
+  w_sstatus(r_sstatus() | SSTATUS_SUM);
+  int res = copyinstr_new(pagetable, dst, srcva, max);
+  w_sstatus(r_sstatus() & ~SSTATUS_SUM);
+  return res;
 }
 
 // check if use global kpgtbl or not
@@ -378,4 +414,49 @@ int test_pagetable() {
   uint64 gsatp = MAKE_SATP(kernel_pagetable);
   printf("test_pagetable: %d\n", satp != gsatp);
   return satp != gsatp;
+}
+
+const char* pte_flags_str(pte_t pte) {
+    static char flags[5];
+    int idx = 0;
+    
+    flags[idx++] = (pte & PTE_R) ? 'r' : '-';
+    flags[idx++] = (pte & PTE_W) ? 'w' : '-';
+    flags[idx++] = (pte & PTE_X) ? 'x' : '-';
+    flags[idx++] = (pte & PTE_U) ? 'u' : '-';
+    flags[idx] = '\0';
+    
+    return flags;
+}
+
+// 递归打印页表
+void vmprint_helper(pagetable_t pagetable, int level, uint64 base_va) {
+    static char* level_prefix[] = {"|| ", "|| || ", "|| || || "};
+    
+    for (int i = 0; i < 512; i++) {
+        pte_t pte = pagetable[i];
+        if (pte & PTE_V) {
+            // 计算当前级别的虚拟地址部分
+            uint64 va_part = (uint64)i << (12 + 9 * (2 - level));
+            uint64 current_va = base_va | va_part;
+            
+            if ((pte & (PTE_R|PTE_W|PTE_X)) == 0) {
+                // 指向下级页表
+                printf("%sidx: %d: pa: %p, flags: %s\n", 
+                       level_prefix[level], i, PTE2PA(pte), pte_flags_str(pte));
+                uint64 child = PTE2PA(pte);
+                vmprint_helper((pagetable_t)child, level + 1, current_va);
+            } else {
+                // 叶子PTE - 指向实际物理页面
+                printf("%sidx: %d: va: %p -> pa: %p, flags: %s\n", 
+                       level_prefix[level], i, current_va, PTE2PA(pte), pte_flags_str(pte));
+            }
+        }
+    }
+}
+
+// 主打印函数
+void vmprint(pagetable_t pagetable) {
+    printf("page table %p\n", pagetable);
+    vmprint_helper(pagetable, 0, 0);
 }

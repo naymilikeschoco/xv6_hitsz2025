@@ -25,6 +25,7 @@ extern char trampoline[];  // trampoline.S
 void procinit(void) {
   struct proc *p;
 
+  //把内核栈的物理地址pa拷贝到PCB新增的成员kstack_pa中，同时还需要保留内核栈在全局页表kernel_pagetable的映射
   initlock(&pid_lock, "nextpid");
   for (p = proc; p < &proc[NPROC]; p++) {
     initlock(&p->lock, "proc");
@@ -37,6 +38,7 @@ void procinit(void) {
     uint64 va = KSTACK((int)(p - proc));
     kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
     p->kstack = va;
+    p->kstack_pa = (uint64)pa;
   }
   kvminithart();
 }
@@ -81,9 +83,10 @@ int allocpid() {
 // If found, initialize state required to run in the kernel,
 // and return with p->lock held.
 // If there are no free procs, or a memory allocation fails, return 0.
+//在allocproc函数里调用Step 2 创建的函数设置内核页表，并且参考借鉴kvmmap函数将Step 3 设置的内核栈映射到页表k_pagetable里。
 static struct proc *allocproc(void) {
   struct proc *p;
-
+  
   for (p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
     if (p->state == UNUSED) {
@@ -95,6 +98,19 @@ static struct proc *allocproc(void) {
   return 0;
 
 found:
+
+  p->k_pagetable = proc_kvminit();
+  if (p->k_pagetable == 0) {
+    freeproc(p);
+    return 0;
+  }
+  
+  if (mappages(p->k_pagetable, p->kstack, PGSIZE,
+               p->kstack_pa, PTE_R | PTE_W) != 0) {
+    freeproc(p);
+    return 0;
+  }
+
   p->pid = allocpid();
 
   // Allocate a trapframe page.
@@ -120,6 +136,28 @@ found:
   return p;
 }
 
+void proc_freekpgtbl(pagetable_t pagetable) {
+  // 我们不希望释放叶子页帧，只释放页表结构。
+  // 所以先清空所有叶子项。
+  for (int i = 0; i < 512; i++) {
+    pte_t pte = pagetable[i];
+    if (pte & PTE_V) {
+      if (pte & (PTE_R | PTE_W | PTE_X)) {
+        // 叶子页表项（映射到物理页帧）
+        pagetable[i] = 0;
+      } else {
+        // 递归清理下一层
+        uint64 child = PTE2PA(pte);
+        proc_freekpgtbl((pagetable_t)child);
+        pagetable[i] = 0;
+      }
+    }
+  }
+  // 释放当前页表页
+  kfree((void *)pagetable);
+}
+
+
 // free a proc structure and the data hanging from it,
 // including user pages.
 // p->lock must be held.
@@ -129,6 +167,18 @@ static void freeproc(struct proc *p) {
   if (p->pagetable) proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
   p->sz = 0;
+
+  // 处理内核页表和内核栈
+  if (p->k_pagetable) {
+    // 先取消内核栈映射
+    if (p->kstack) {
+      uvmunmap(p->k_pagetable, p->kstack, 1, 0);
+    }
+    // 然后释放内核页表（不释放物理页）
+    proc_freekpgtbl(p->k_pagetable);
+    p->k_pagetable = 0;
+  }
+
   p->pid = 0;
   p->parent = 0;
   p->name[0] = 0;
@@ -193,6 +243,8 @@ void userinit(void) {
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
 
+  sync_pagetable(p->k_pagetable, p->pagetable);
+
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
   p->trapframe->sp = PGSIZE;  // user stack pointer
@@ -220,6 +272,7 @@ int growproc(int n) {
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
   p->sz = sz;
+  sync_pagetable(p->k_pagetable, p->pagetable);
   return 0;
 }
 
@@ -242,6 +295,8 @@ int fork(void) {
     return -1;
   }
   np->sz = p->sz;
+
+  sync_pagetable(np->k_pagetable, np->pagetable);
 
   np->parent = p;
 
@@ -296,6 +351,8 @@ void reparent(struct proc *p) {
 // until its parent calls wait().
 void exit(int status) {
   struct proc *p = myproc();
+
+  unsync_pagetable(p->k_pagetable);
 
   if (p == initproc) panic("init exiting");
 
@@ -417,6 +474,7 @@ void scheduler(void) {
   struct cpu *c = mycpu();
 
   c->proc = 0;
+  // kvminithart();
   for (;;) {
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
@@ -428,9 +486,16 @@ void scheduler(void) {
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
+        // 切换页表：进入进程页表
+        w_satp(MAKE_SATP(p->k_pagetable));
+        sfence_vma();
+
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
+
+        // 返回调度器后，恢复内核页表
+        kvminithart();
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
@@ -442,6 +507,7 @@ void scheduler(void) {
     }
 #if !defined(LAB_FS)
     if (found == 0) {
+      // kvminithart();
       intr_on();
       asm volatile("wfi");
     }
