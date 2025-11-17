@@ -1,0 +1,753 @@
+diff --git a/.vscode/settings.json b/.vscode/settings.json
+new file mode 100644
+index 0000000..b0d0698
+--- /dev/null
++++ b/.vscode/settings.json
+@@ -0,0 +1,3 @@
++{
++    "makefile.configureOnOpen": true
++}
+\ No newline at end of file
+diff --git a/Makefile b/Makefile
+index b971308..1f68a81 100644
+--- a/Makefile
++++ b/Makefile
+@@ -157,6 +157,9 @@ UPROGS=\
+ 	$U/_grind\
+ 	$U/_wc\
+ 	$U/_zombie\
++	$U/_sleep\
++	$U/_pingpong\
++	$U/_find\
+ 
+ 
+ ifeq ($(LAB),syscall)
+@@ -242,15 +245,8 @@ qemu-gdb: $K/kernel .gdbinit fs.img
+ 	@echo "*** Now run 'gdb' in another window." 1>&2
+ 	$(QEMU) $(QEMUOPTS) -S $(QEMUGDB)
+ 
+-GDBARGS = 
+-GDBARGS += -ex 'set architecture riscv:rv64'
+-GDBARGS += -ex 'target remote 127.0.0.1:$(GDBPORT)'
+-GDBARGS += -ex 'symbol-file kernel/kernel'
+-GDBARGS += -ex 'set riscv use-compressed-breakpoints yes'
+-
+-
+ gdb: 
+-	$(GDB) $(GDBARGS)
++	$(GDB)
+ 
+ ##
+ ##  FOR testing lab grading script
+diff --git a/commands.gdb b/commands.gdb
+new file mode 100644
+index 0000000..f31498e
+--- /dev/null
++++ b/commands.gdb
+@@ -0,0 +1,155 @@
++h si
++si
++si
++si
++b *0x80000086
++continue
++u 58
++info registers mepc
++i r mepc
++si
++n
++n
++n
++n
++n
++n
++n
++n
++n
++n
++n
++n
++n
++n
++n
++n
++n
++h s
++s
++n
++n
++n
++n
++n
++n
++n
++p p->name
++finish
++b main.c:42
++c
++s
++n
++n
++n
++n
++n
++n
++p p->name
++n
++n
++si
++si
++si 10
++si 10
++si 10
++i r ra
++si
++n
++n
++n
++n
++n
++s
++u 112
++si
++si
++si
++si
++si 10
++si 10
++si 10
++si 10
++si
++si
++si
++si
++i r sepc
++si
++si
++si
++si
++si
++si
++i r stvec
++i r scause
++si
++i r stvec
++i r scause
++si 10
++si 10
++si
++si
++si
++si
++si
++si
++si
++si
++si
++si
++si
++si
++si
++si
++si
++si
++si
++si
++si
++si
++si
++n
++n
++n
++n
++n
++p p->name
++n
++si
++si
++n
++i r scause
++n
++n
++n
++n
++n
++s
++n
++p p->name
++u 112
++si
++si
++si
++si
++si
++si
++si
++si
++si
++si
++si
++si
++si
++si 10
++si 10
++si 10
++si 
++si
++si
++si
++si
++si
++add-symbol-file user/_init
++da
+diff --git a/commit.patch b/commit.patch
+new file mode 100644
+index 0000000..5a4e7e9
+--- /dev/null
++++ b/commit.patch
+@@ -0,0 +1,383 @@
++diff --git a/.vscode/settings.json b/.vscode/settings.json
++new file mode 100644
++index 0000000..b0d0698
++--- /dev/null
+++++ b/.vscode/settings.json
++@@ -0,0 +1,3 @@
+++{
+++    "makefile.configureOnOpen": true
+++}
++\ No newline at end of file
++diff --git a/Makefile b/Makefile
++index b971308..1f68a81 100644
++--- a/Makefile
+++++ b/Makefile
++@@ -157,6 +157,9 @@ UPROGS=\
++ 	$U/_grind\
++ 	$U/_wc\
++ 	$U/_zombie\
+++	$U/_sleep\
+++	$U/_pingpong\
+++	$U/_find\
++ 
++ 
++ ifeq ($(LAB),syscall)
++@@ -242,15 +245,8 @@ qemu-gdb: $K/kernel .gdbinit fs.img
++ 	@echo "*** Now run 'gdb' in another window." 1>&2
++ 	$(QEMU) $(QEMUOPTS) -S $(QEMUGDB)
++ 
++-GDBARGS = 
++-GDBARGS += -ex 'set architecture riscv:rv64'
++-GDBARGS += -ex 'target remote 127.0.0.1:$(GDBPORT)'
++-GDBARGS += -ex 'symbol-file kernel/kernel'
++-GDBARGS += -ex 'set riscv use-compressed-breakpoints yes'
++-
++-
++ gdb: 
++-	$(GDB) $(GDBARGS)
+++	$(GDB)
++ 
++ ##
++ ##  FOR testing lab grading script
++diff --git a/commands.gdb b/commands.gdb
++new file mode 100644
++index 0000000..889c27a
++--- /dev/null
+++++ b/commands.gdb
++@@ -0,0 +1,174 @@
+++h si
+++si
+++si
+++si
+++b *0x80000086
+++continue
+++u 58
+++info registers mepc
+++i r mepc
+++p main
+++si
+++n
+++n
+++n
+++n
+++n
+++n
+++n
+++n
+++n
+++n
+++n
+++n
+++n
+++n
+++n
+++n
+++n
+++h s
+++s
+++n
+++n
+++n
+++n
+++n
+++n
+++n
+++p p->name
+++finish
+++b main.c:42
+++c
+++s
+++n
+++n
+++n
+++n
+++n
+++n
+++p p->name
+++n
+++n
+++si
+++si
+++si 10
+++si 10
+++si 10
+++i r ra
+++si
+++n
+++n
+++n
+++n
+++n
+++s
+++p p->name
+++n
+++p p->name
+++u 112
+++si
+++si
+++si
+++si
+++si 10
+++si 10
+++si 10
+++si 10
+++si
+++si
+++si
+++si
+++i r sepc
+++si
+++si
+++si
+++si
+++si
+++si
+++i r stvec
+++i r scause
+++si
+++i r stvec
+++i r scause
+++si 10
+++si 10
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++n
+++n
+++n
+++n
+++n
+++pp->name
+++p p->name
+++n
+++si
+++si
+++n
+++i r scause
+++n
+++n
+++n
+++n
+++n
+++s
+++n
+++p p->name
+++u 112
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si
+++si 10
+++si 1o
+++si 10
+++si 10
+++si 
+++si
+++si
+++si
+++si
+++si
+++add-symbol-file user/-init
+++add-symbol-file user/_init
+++da
+++n
+++n
+++n
+++n
+++n
+++n
+++n
+++n
+++n
+++n
+++n
+++q
++diff --git a/user/find.c b/user/find.c
++new file mode 100644
++index 0000000..b92ae83
++--- /dev/null
+++++ b/user/find.c
++@@ -0,0 +1,81 @@
+++#include "kernel/types.h"
+++#include "kernel/stat.h"
+++#include "user/user.h"
+++#include "kernel/fs.h"
+++
+++void find(char *path, char *name){
+++    char buf[512], *p;         // 缓冲区用于构建完整路径
+++    int fd;                    // 文件描述符
+++    struct dirent de;          // 目录项结构
+++    struct stat st;            // 文件状态结构
+++
+++    // 打开路径
+++    if ((fd = open(path, 0)) < 0){
+++        printf("find: cannot open %s\n", path);
+++        return;
+++    }
+++    
+++    // 获取文件状态
+++    if (fstat(fd, &st) < 0){
+++        printf("find: cannot stat %s\n", path);
+++        close(fd);
+++        return;
+++    }
+++
+++    char *last_name = path;
+++    for (char *temp = path; *temp; temp++) {
+++        if (*temp == '/') {
+++            last_name = temp + 1;    // 提取出路径中的文件名或者目录名部分进行比较
+++        }
+++    }
+++
+++    switch (st.type) {
+++        case T_FILE:
+++        // 如果是文件，检查是否匹配目标文件名
+++            if (strcmp(last_name, name) == 0) {
+++                printf("%s\n", path);
+++            }
+++            break;
+++
+++        case T_DIR:
+++        // 如果是目录，遍历目录项
+++            // 检查目录本身是否匹配
+++            if (strcmp(last_name, name) == 0) {
+++                printf("%s\n", path);
+++            }
+++
+++            if (strlen(path) + 1 + DIRSIZ + 1 > sizeof buf) {
+++                printf("find: path too long\n");
+++                break;
+++            }
+++            // 下面递归查找
+++            // 构建基础路径
+++            strcpy(buf, path);
+++            p = buf + strlen(buf);
+++            *p++ = '/';
+++            // 遍历目录中的所有项
+++            while (read(fd, &de, sizeof(de)) == sizeof(de)) {
+++                if (de.inum == 0) continue; // 跳过空目录项
+++                if (strcmp(de.name, ".") == 0 || strcmp(de.name, "..") == 0) continue;  // 跳过 "." 和 ".."，避免无限递归
+++                // 构建完整子路径
+++                memmove(p, de.name, DIRSIZ);
+++                p[DIRSIZ] = 0;  // 确保字符串以null结尾
+++                // 递归调用find函数
+++                find(buf, name);
+++            }
+++            break;
+++    }
+++    close(fd);
+++}
+++
+++
+++int main(int argc, char *argv[]){
+++    if (argc < 3) {
+++        printf("Error! Usage: find <path> <filename>\n");
+++        exit(1);
+++    }
+++    char *path = argv[1];
+++    char *name = argv[2];
+++    find(path, name);
+++    exit(0);
+++}
++\ No newline at end of file
++diff --git a/user/pingpong.c b/user/pingpong.c
++new file mode 100644
++index 0000000..b070b44
++--- /dev/null
+++++ b/user/pingpong.c
++@@ -0,0 +1,47 @@
+++#include "kernel/types.h"
+++#include "user.h"
+++
+++int main(int argc, char *argv[]){
+++    int ctf[2], ftc[2];
+++    pipe(ctf);  // child to father
+++    pipe(ftc);  // father to child
+++    if(fork() == 0){
+++        // child
+++        close(ctf[0]);
+++        close(ftc[1]);
+++
+++        char buf[16];
+++        read(ftc[0], buf, sizeof(buf));
+++        int parent_pid = atoi(buf);
+++        int child_pid = getpid();
+++        printf("%d: received ping from pid %d\n", child_pid, parent_pid);
+++
+++        // deliver child_pid to parent!
+++        char message[16];
+++        itoa(child_pid, message);
+++        write(ctf[1], message, strlen(message) + 1);
+++
+++        close(ctf[1]);
+++        close(ftc[0]);
+++        exit(0);
+++    }
+++    else{
+++        // parent
+++        close(ctf[1]);
+++        close(ftc[0]);
+++        //according to the child's behaviour, parent should sends its pid to child firstly
+++        char message[16];
+++        int parent_pid = getpid();
+++        itoa(parent_pid, message);
+++        write(ftc[1], message, strlen(message) + 1);
+++
+++        char buf[16];
+++        read(ctf[0], buf, sizeof(buf));
+++        int child_pid = atoi(buf);
+++        printf("%d: received pong from pid %d\n", parent_pid, child_pid);
+++        close(ctf[0]);
+++        close(ftc[1]);
+++        wait(0);
+++    }
+++    exit(0);
+++}
++\ No newline at end of file
++diff --git a/user/sleep.c b/user/sleep.c
++new file mode 100644
++index 0000000..24b98e3
++--- /dev/null
+++++ b/user/sleep.c
++@@ -0,0 +1,13 @@
+++#include "kernel/types.h"
+++#include "user.h"
+++
+++int main(int argc, char *argv[]){
+++    if(argc != 2){
+++        printf("Sleep needs one argument!\n");
+++        exit(-1);
+++    }
+++    int ticks = atoi(argv[1]);
+++    sleep(ticks);
+++    printf("(nothing happens for a little while)\n");
+++    exit(0);
+++}
++\ No newline at end of file
+diff --git a/user/find.c b/user/find.c
+new file mode 100644
+index 0000000..b92ae83
+--- /dev/null
++++ b/user/find.c
+@@ -0,0 +1,81 @@
++#include "kernel/types.h"
++#include "kernel/stat.h"
++#include "user/user.h"
++#include "kernel/fs.h"
++
++void find(char *path, char *name){
++    char buf[512], *p;         // 缓冲区用于构建完整路径
++    int fd;                    // 文件描述符
++    struct dirent de;          // 目录项结构
++    struct stat st;            // 文件状态结构
++
++    // 打开路径
++    if ((fd = open(path, 0)) < 0){
++        printf("find: cannot open %s\n", path);
++        return;
++    }
++    
++    // 获取文件状态
++    if (fstat(fd, &st) < 0){
++        printf("find: cannot stat %s\n", path);
++        close(fd);
++        return;
++    }
++
++    char *last_name = path;
++    for (char *temp = path; *temp; temp++) {
++        if (*temp == '/') {
++            last_name = temp + 1;    // 提取出路径中的文件名或者目录名部分进行比较
++        }
++    }
++
++    switch (st.type) {
++        case T_FILE:
++        // 如果是文件，检查是否匹配目标文件名
++            if (strcmp(last_name, name) == 0) {
++                printf("%s\n", path);
++            }
++            break;
++
++        case T_DIR:
++        // 如果是目录，遍历目录项
++            // 检查目录本身是否匹配
++            if (strcmp(last_name, name) == 0) {
++                printf("%s\n", path);
++            }
++
++            if (strlen(path) + 1 + DIRSIZ + 1 > sizeof buf) {
++                printf("find: path too long\n");
++                break;
++            }
++            // 下面递归查找
++            // 构建基础路径
++            strcpy(buf, path);
++            p = buf + strlen(buf);
++            *p++ = '/';
++            // 遍历目录中的所有项
++            while (read(fd, &de, sizeof(de)) == sizeof(de)) {
++                if (de.inum == 0) continue; // 跳过空目录项
++                if (strcmp(de.name, ".") == 0 || strcmp(de.name, "..") == 0) continue;  // 跳过 "." 和 ".."，避免无限递归
++                // 构建完整子路径
++                memmove(p, de.name, DIRSIZ);
++                p[DIRSIZ] = 0;  // 确保字符串以null结尾
++                // 递归调用find函数
++                find(buf, name);
++            }
++            break;
++    }
++    close(fd);
++}
++
++
++int main(int argc, char *argv[]){
++    if (argc < 3) {
++        printf("Error! Usage: find <path> <filename>\n");
++        exit(1);
++    }
++    char *path = argv[1];
++    char *name = argv[2];
++    find(path, name);
++    exit(0);
++}
+\ No newline at end of file
+diff --git a/user/pingpong.c b/user/pingpong.c
+new file mode 100644
+index 0000000..b070b44
+--- /dev/null
++++ b/user/pingpong.c
+@@ -0,0 +1,47 @@
++#include "kernel/types.h"
++#include "user.h"
++
++int main(int argc, char *argv[]){
++    int ctf[2], ftc[2];
++    pipe(ctf);  // child to father
++    pipe(ftc);  // father to child
++    if(fork() == 0){
++        // child
++        close(ctf[0]);
++        close(ftc[1]);
++
++        char buf[16];
++        read(ftc[0], buf, sizeof(buf));
++        int parent_pid = atoi(buf);
++        int child_pid = getpid();
++        printf("%d: received ping from pid %d\n", child_pid, parent_pid);
++
++        // deliver child_pid to parent!
++        char message[16];
++        itoa(child_pid, message);
++        write(ctf[1], message, strlen(message) + 1);
++
++        close(ctf[1]);
++        close(ftc[0]);
++        exit(0);
++    }
++    else{
++        // parent
++        close(ctf[1]);
++        close(ftc[0]);
++        //according to the child's behaviour, parent should sends its pid to child firstly
++        char message[16];
++        int parent_pid = getpid();
++        itoa(parent_pid, message);
++        write(ftc[1], message, strlen(message) + 1);
++
++        char buf[16];
++        read(ctf[0], buf, sizeof(buf));
++        int child_pid = atoi(buf);
++        printf("%d: received pong from pid %d\n", parent_pid, child_pid);
++        close(ctf[0]);
++        close(ftc[1]);
++        wait(0);
++    }
++    exit(0);
++}
+\ No newline at end of file
+diff --git a/user/sleep.c b/user/sleep.c
+new file mode 100644
+index 0000000..24b98e3
+--- /dev/null
++++ b/user/sleep.c
+@@ -0,0 +1,13 @@
++#include "kernel/types.h"
++#include "user.h"
++
++int main(int argc, char *argv[]){
++    if(argc != 2){
++        printf("Sleep needs one argument!\n");
++        exit(-1);
++    }
++    int ticks = atoi(argv[1]);
++    sleep(ticks);
++    printf("(nothing happens for a little while)\n");
++    exit(0);
++}
+\ No newline at end of file
